@@ -1,32 +1,30 @@
-use tracing::{info, Level};
 use {
-    crate::routes::{index, static_files},
-    axum::{routing::get, Router},
-    serde::Deserialize,
-    std::net::SocketAddr,
+    crate::routes::{index, leaderboard, new_submission, static_files, submissions},
+    axum::{extract::DefaultBodyLimit, routing::get, Router},
+    sqlx::postgres::PgPoolOptions,
+    std::time::Duration,
+    tokio::signal,
     tower_http::{
         classify::{ServerErrorsAsFailures, SharedClassifier},
+        limit::RequestBodyLimitLayer,
         trace::{
             DefaultMakeSpan, DefaultOnFailure, DefaultOnRequest, DefaultOnResponse, TraceLayer,
         },
     },
+    tracing::{info, warn, Level},
     tracing_subscriber::{fmt, prelude::*, EnvFilter},
 };
 
+mod config;
 mod routes;
 
-/// Configuration parameters
-#[derive(Clone, Debug, Deserialize)]
-pub struct Config {
-    /// Socket to bind HTTP server to
-    pub bind_address: SocketAddr,
+pub use crate::config::Config;
 
-    /// Postgres URL
-    pub database_url: String,
+/// Maximum file upload size in bytes
+const MAX_UPLOAD_SIZE: usize = 512 * 1024 * 1024;
 
-    /// Log level filter
-    pub log_level: String,
-}
+const DATABASE_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(5);
+const DATABASE_MIN_CONNECTIONS: u32 = 5;
 
 pub async fn start(config: Config) -> color_eyre::Result<()> {
     // initialize tracing
@@ -35,17 +33,36 @@ pub async fn start(config: Config) -> color_eyre::Result<()> {
         .with(EnvFilter::builder().parse(config.log_level)?)
         .try_init()?;
 
+    // connect to postgres
+    let db = PgPoolOptions::new()
+        .acquire_timeout(DATABASE_ACQUIRE_TIMEOUT)
+        .min_connections(DATABASE_MIN_CONNECTIONS)
+        .connect(&config.database_url)
+        .await?;
+
+    info!("running migrations");
+    sqlx::migrate!().run(&db).await?;
+
     let app = Router::new()
-        // `GET /` goes to `root`
+        // `GET /` goes to `/static/index.html`
         .route("/", get(index))
+        .route("/leaderboard", get(leaderboard))
+        .route("/submissions", get(submissions).post(new_submission))
         // serve static files included in binary
         .route("/static/*path", get(static_files))
+        .with_state(db)
+        .layer(DefaultBodyLimit::disable())
+        .layer(RequestBodyLimitLayer::new(MAX_UPLOAD_SIZE))
         .layer(create_trace_layer());
 
     // start app
     let listener = tokio::net::TcpListener::bind(config.bind_address).await?;
     info!("listening @ {:?}", listener.local_addr()?);
-    Ok(axum::serve(listener, app).await?)
+
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .map_err(Into::into)
 }
 
 /// Creates a TraceLayer for request, response and failure logging
@@ -66,4 +83,26 @@ pub fn create_trace_layer() -> TraceLayer<SharedClassifier<ServerErrorsAsFailure
                 .level(Level::INFO)
                 .include_headers(true),
         )
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+        warn!("received Ctrl+C")
+    };
+
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to install signal handler")
+            .recv()
+            .await;
+        warn!("received terminate signal")
+    };
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
 }

@@ -1,0 +1,26 @@
+version: '3.8'
+services:
+  bord:
+    build: .
+    restart: always
+    ports:
+      - 3000:3000
+    environment:
+      - BIND_ADDRESS=0.0.0.0:3000
+      - DATABASE_URL=psql://postgres:insecure@postgres:5432/bord
+      - LOG_LEVEL=bord=debug,sqlx=info
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:alpine
+    restart: always
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=insecure
+      - POSTGRES_DB=bord
+    volumes:
+      - postgres:/var/lib/postgresql/data
+
+volumes:
+  postgres:

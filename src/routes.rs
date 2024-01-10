@@ -40,3 +40,15 @@ pub async fn static_files(Path(path): Path<String>) -> Response {
     )
         .into_response()
 }
+
+pub async fn leaderboard() -> impl IntoResponse {
+    todo!("return leaderboard json")
+}
+
+pub async fn submissions() -> impl IntoResponse {
+    todo!("return submissions queue json")
+}
+
+pub async fn new_submission() -> impl IntoResponse {
+    todo!("return submissions queue json")
+}
