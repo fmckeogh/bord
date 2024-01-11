@@ -1,3 +1,4 @@
+use axum_typed_multipart::TypedMultipartError;
 use {
     crate::error::Error,
     axum::{
@@ -52,8 +53,9 @@ pub async fn static_files(Path(path): Path<String>) -> Response {
 struct LeaderboardEntry {
     timestamp: i64,
     score: i32,
-    language: String,
     pseudonym: String,
+    filename: String,
+    filesize: i32,
 }
 
 pub async fn leaderboard(State(db): State<Pool<Postgres>>) -> Result<impl IntoResponse, Error> {
@@ -61,19 +63,20 @@ pub async fn leaderboard(State(db): State<Pool<Postgres>>) -> Result<impl IntoRe
         sqlx::query_as!(
             LeaderboardEntry,
             r#"
-            SELECT
-                CAST(
-                    EXTRACT(
-                        EPOCH FROM leaderboard.submitted_at
-                    ) as bigint
-                ) as "timestamp!",
-                score,
-                language,
-                pseudonym
-            FROM leaderboard
-            INNER JOIN users
-                ON leaderboard.username=users.username
-        "#
+                SELECT
+                    CAST(
+                        EXTRACT(
+                            EPOCH FROM leaderboard.submitted_at
+                        ) as bigint
+                    ) as "timestamp!",
+                    score,
+                    pseudonym,
+                    file_name as filename,
+                    file_size as filesize
+                FROM leaderboard
+                INNER JOIN users
+                    ON leaderboard.username=users.username
+            "#
         )
         .fetch_all(&db)
         .await?,
@@ -84,6 +87,8 @@ pub async fn leaderboard(State(db): State<Pool<Postgres>>) -> Result<impl IntoRe
 struct SubmissionEntry {
     timestamp: i64,
     pseudonym: String,
+    filename: String,
+    filesize: i32,
 }
 
 pub async fn submissions(State(db): State<Pool<Postgres>>) -> Result<impl IntoResponse, Error> {
@@ -91,17 +96,19 @@ pub async fn submissions(State(db): State<Pool<Postgres>>) -> Result<impl IntoRe
         sqlx::query_as!(
             SubmissionEntry,
             r#"
-            SELECT
-                CAST(
-                    EXTRACT(
-                        EPOCH FROM submissions.submitted_at
-                    ) as bigint
-                ) as "timestamp!",
-                pseudonym
-            FROM submissions
-            INNER JOIN users
-                ON submissions.username=users.username
-        "#
+                SELECT
+                    CAST(
+                        EXTRACT(
+                            EPOCH FROM submissions.submitted_at
+                        ) as bigint
+                    ) as "timestamp!",
+                    pseudonym,
+                    file_name as filename,
+                    length(file_contents) as "filesize!"
+                FROM submissions
+                INNER JOIN users
+                    ON submissions.username=users.username
+            "#
         )
         .fetch_all(&db)
         .await?,
@@ -109,19 +116,61 @@ pub async fn submissions(State(db): State<Pool<Postgres>>) -> Result<impl IntoRe
 }
 
 #[derive(Debug, TryFromMultipart)]
+#[try_from_multipart(strict)]
 pub struct Submission {
     username: String,
+    #[form_data(limit = "unlimited")]
     file: FieldData<Bytes>,
 }
 
 pub async fn new_submission(
-    data: BaseMultipart<Submission, Error>,
+    State(db): State<Pool<Postgres>>,
+    BaseMultipart {
+        data: Submission { username, file },
+        ..
+    }: BaseMultipart<Submission, Error>,
 ) -> Result<impl IntoResponse, Error> {
+    let file_contents = file.contents.to_vec();
+    let file_name = file
+        .metadata
+        .file_name
+        .ok_or(TypedMultipartError::MissingField {
+            field_name: "filename".to_owned(),
+        })?;
+
     debug!(
         "received {:?} ({} bytes) from {}",
-        data.file.metadata.file_name,
-        data.file.contents.len(),
-        data.username
+        file_name,
+        file_contents.len(),
+        username
     );
+
+    {
+        let mut tx = db.begin().await?;
+
+        sqlx::query!(
+            r#"
+                INSERT INTO users (username, pseudonym) VALUES ($1, $2) ON CONFLICT DO NOTHING;
+            "#,
+            &username,
+            "beep",
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query!(
+            r#"
+                INSERT INTO submissions (username, file_contents, file_name) VALUES ($1, $2, $3);
+            "#,
+            &username,
+            file_contents,
+            file_name,
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+    }
+
     Ok(StatusCode::OK)
 }

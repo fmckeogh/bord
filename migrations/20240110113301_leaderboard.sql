@@ -2,6 +2,7 @@
 CREATE TABLE IF NOT EXISTS leaderboard (
     username VARCHAR(16) NOT NULL PRIMARY KEY,
     submitted_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    language VARCHAR(16) NOT NULL,
+    file_name TEXT NOT NULL,
+    file_size INTEGER NOT NULL,
     score INTEGER NOT NULL
 );

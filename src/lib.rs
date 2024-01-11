@@ -24,7 +24,7 @@ mod routes;
 pub use crate::config::Config;
 
 /// Maximum file upload size in bytes
-const MAX_UPLOAD_SIZE: usize = 1024 * 1024 * 1024;
+const MAX_UPLOAD_SIZE: usize = 768 * 1024 * 1024;
 
 const DATABASE_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(5);
 const DATABASE_MIN_CONNECTIONS: u32 = 5;

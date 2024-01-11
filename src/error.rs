@@ -21,7 +21,7 @@ pub enum Error {
 
 impl IntoResponse for Error {
     fn into_response(self) -> Response {
-        error!("Error occurred when handling request: {}", self);
+        error!("Error occurred when handling request: {:?}", self);
 
         let status_code = match self {
             Error::Database(_) | Error::Multipart(_) => StatusCode::INTERNAL_SERVER_ERROR,

@@ -8,13 +8,13 @@ RUN apk add --no-cache musl-dev mold
 RUN cargo init --bin .
 COPY Cargo.lock .
 COPY Cargo.toml .
-RUN mold -run cargo build --release
+RUN mold -run cargo build
 
 # build app
 COPY . .
 RUN touch src/main.rs
-RUN mold -run cargo build --release
+RUN mold -run cargo build
 
 FROM scratch
-COPY --from=builder /tmp/workdir/target/release/bord .
+COPY --from=builder /tmp/workdir/target/debug/bord .
 ENTRYPOINT ["./bord"]
