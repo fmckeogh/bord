@@ -1,6 +1,8 @@
 use {
     crate::routes::{index, leaderboard, new_submission, static_files, submissions},
     axum::{extract::DefaultBodyLimit, routing::get, Router},
+    bollard::Docker,
+    color_eyre::eyre::Context,
     sqlx::postgres::PgPoolOptions,
     std::time::Duration,
     tokio::signal,
@@ -16,15 +18,18 @@ use {
 };
 
 mod config;
+mod error;
 mod routes;
 
 pub use crate::config::Config;
 
 /// Maximum file upload size in bytes
-const MAX_UPLOAD_SIZE: usize = 512 * 1024 * 1024;
+const MAX_UPLOAD_SIZE: usize = 1024 * 1024 * 1024;
 
 const DATABASE_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(5);
 const DATABASE_MIN_CONNECTIONS: u32 = 5;
+
+const DOCKER_CONNECT_TIMEOUT: u64 = 5;
 
 pub async fn start(config: Config) -> color_eyre::Result<()> {
     // initialize tracing
@@ -38,10 +43,25 @@ pub async fn start(config: Config) -> color_eyre::Result<()> {
         .acquire_timeout(DATABASE_ACQUIRE_TIMEOUT)
         .min_connections(DATABASE_MIN_CONNECTIONS)
         .connect(&config.database_url)
-        .await?;
+        .await
+        .wrap_err(format!(
+            "Failed to connect to database @ {:?}",
+            &config.database_url
+        ))?;
 
-    info!("running migrations");
+    info!(
+        "connected to postgres @ {}, running migrations",
+        config.database_url
+    );
     sqlx::migrate!().run(&db).await?;
+
+    // connect to Docker
+    let docker = Docker::connect_with_socket(
+        &config.docker_socket,
+        DOCKER_CONNECT_TIMEOUT,
+        bollard::API_DEFAULT_VERSION,
+    )?;
+    info!("connected to docker: {}", docker.ping().await?);
 
     let app = Router::new()
         // `GET /` goes to `/static/index.html`

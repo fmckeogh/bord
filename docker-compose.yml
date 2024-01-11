@@ -8,13 +8,18 @@ services:
     environment:
       - BIND_ADDRESS=0.0.0.0:3000
       - DATABASE_URL=psql://postgres:insecure@postgres:5432/bord
+      - DOCKER_SOCKET=/var/run/docker.sock
       - LOG_LEVEL=bord=debug,sqlx=info
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - postgres
 
   postgres:
     image: postgres:alpine
     restart: always
+    ports:
+      - 5432:5432
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=insecure

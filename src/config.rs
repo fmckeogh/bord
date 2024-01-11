@@ -14,6 +14,9 @@ pub struct Config {
     /// Postgres URL
     pub database_url: String,
 
+    /// Path to Docker socket
+    pub docker_socket: String,
+
     /// Log level filter
     pub log_level: String,
 }
