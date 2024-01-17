@@ -1,5 +1,8 @@
 use {
-    crate::routes::{index, leaderboard, new_submission, static_files, submissions},
+    crate::{
+        benchmarking::submission_runner,
+        routes::{index, leaderboard, new_submission, static_files, submissions},
+    },
     axum::{extract::DefaultBodyLimit, routing::get, Router},
     bollard::Docker,
     color_eyre::eyre::Context,
@@ -17,6 +20,7 @@ use {
     tracing_subscriber::{fmt, prelude::*, EnvFilter},
 };
 
+mod benchmarking;
 mod config;
 mod error;
 mod routes;
@@ -26,10 +30,13 @@ pub use crate::config::Config;
 /// Maximum file upload size in bytes
 const MAX_UPLOAD_SIZE: usize = 768 * 1024 * 1024;
 
-const DATABASE_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(5);
+/// Timeout when acquiring new connection
+const DATABASE_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(3);
+/// Minimum number of connections to keep open at a time
 const DATABASE_MIN_CONNECTIONS: u32 = 5;
 
-const DOCKER_CONNECT_TIMEOUT: u64 = 5;
+/// Timeout to connect to Docker
+const DOCKER_CONNECT_TIMEOUT: u64 = 3;
 
 pub async fn start(config: Config) -> color_eyre::Result<()> {
     // initialize tracing
@@ -70,10 +77,17 @@ pub async fn start(config: Config) -> color_eyre::Result<()> {
         .route("/submissions", get(submissions).post(new_submission))
         // serve static files included in binary
         .route("/static/*path", get(static_files))
-        .with_state(db)
+        // make database pool state for handlers
+        .with_state(db.clone())
+        // remove the default body limit...
         .layer(DefaultBodyLimit::disable())
+        // ...and set a new one
         .layer(RequestBodyLimitLayer::new(MAX_UPLOAD_SIZE))
+        // wrap everything in a trace layer
         .layer(create_trace_layer());
+
+    // start submission runner
+    tokio::spawn(async { submission_runner(db, docker).await });
 
     // start app
     let listener = tokio::net::TcpListener::bind(config.bind_address).await?;
@@ -105,6 +119,7 @@ pub fn create_trace_layer() -> TraceLayer<SharedClassifier<ServerErrorsAsFailure
         )
 }
 
+/// Future awaiting either a Ctrl+C or a terminate signal
 async fn shutdown_signal() {
     let ctrl_c = async {
         signal::ctrl_c()

@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                submissions.submitted_at,\n                username,\n                file_name,\n                file_contents\n            FROM submissions\n            ORDER BY submitted_at\n            LIMIT 1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "submitted_at",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "username",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "file_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "file_contents",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "99f9c000ac65466e12840b998d1cc978023e5d067abff57e3ce0df95e28821a3"
+}

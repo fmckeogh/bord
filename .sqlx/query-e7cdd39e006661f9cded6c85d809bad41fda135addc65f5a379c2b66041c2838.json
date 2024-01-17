@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM submissions\n            WHERE username = $1 AND submitted_at = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e7cdd39e006661f9cded6c85d809bad41fda135addc65f5a379c2b66041c2838"
+}

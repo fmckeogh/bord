@@ -22,10 +22,9 @@ pub struct Config {
 }
 
 impl Config {
-    /// Builds a new Config instance from an optional file (the path of which is
-    /// supplied as a argument) and, with a greater priority, environment
+    /// Builds a new Config instance from environment
     /// variables
-    pub fn new() -> Result<Self> {
+    pub fn from_env() -> Result<Self> {
         dotenv::dotenv().ok();
 
         config::Config::builder()

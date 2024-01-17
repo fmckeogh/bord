@@ -1,4 +1,3 @@
-use axum_typed_multipart::TypedMultipartError;
 use {
     crate::error::Error,
     axum::{
@@ -8,16 +7,14 @@ use {
         response::{IntoResponse, Response},
         Json,
     },
-    axum_extra::{
-        headers::{CacheControl, ContentType},
-        TypedHeader,
-    },
-    axum_typed_multipart::{BaseMultipart, FieldData, TryFromMultipart},
+    axum_extra::{headers::ContentType, TypedHeader},
+    axum_typed_multipart::{BaseMultipart, FieldData, TryFromMultipart, TypedMultipartError},
     include_dir::{include_dir, Dir},
     serde::Serialize,
     sqlx::{Pool, Postgres},
-    std::time::Duration,
+    std::hash::Hasher,
     tracing::debug,
+    twox_hash::XxHash64,
 };
 
 /// Index response
@@ -27,30 +24,22 @@ pub async fn index() -> impl IntoResponse {
 
 /// Handler for static files
 pub async fn static_files(Path(path): Path<String>) -> Response {
-    const STATIC_FILES_MAX_AGE: Duration = Duration::from_secs(3600);
-
     static STATIC_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/static");
 
+    // retrieve file from static dir if it exists
     let Some(file) = STATIC_DIR.get_file(&path) else {
         return StatusCode::NOT_FOUND.into_response();
     };
 
+    // try to guess the mime type
     let mime_type = mime_guess::from_path(path).first_or_text_plain();
 
-    (
-        TypedHeader(ContentType::from(mime_type)),
-        TypedHeader(
-            CacheControl::new()
-                .with_max_age(STATIC_FILES_MAX_AGE)
-                .with_public(),
-        ),
-        file.contents(),
-    )
-        .into_response()
+    // serve the file
+    (TypedHeader(ContentType::from(mime_type)), file.contents()).into_response()
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct LeaderboardEntry {
+pub struct LeaderboardEntry {
     timestamp: i64,
     score: i32,
     pseudonym: String,
@@ -58,17 +47,14 @@ struct LeaderboardEntry {
     filesize: i32,
 }
 
+// Returns a JSON array of leaderboard entries
 pub async fn leaderboard(State(db): State<Pool<Postgres>>) -> Result<impl IntoResponse, Error> {
     Ok(Json(
         sqlx::query_as!(
             LeaderboardEntry,
             r#"
                 SELECT
-                    CAST(
-                        EXTRACT(
-                            EPOCH FROM leaderboard.submitted_at
-                        ) as bigint
-                    ) as "timestamp!",
+                    submitted_at as "timestamp",
                     score,
                     pseudonym,
                     file_name as filename,
@@ -84,24 +70,21 @@ pub async fn leaderboard(State(db): State<Pool<Postgres>>) -> Result<impl IntoRe
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct SubmissionEntry {
+pub struct SubmissionEntry {
     timestamp: i64,
     pseudonym: String,
     filename: String,
     filesize: i32,
 }
 
+// Returns a JSON array of submission entries
 pub async fn submissions(State(db): State<Pool<Postgres>>) -> Result<impl IntoResponse, Error> {
     Ok(Json(
         sqlx::query_as!(
             SubmissionEntry,
             r#"
                 SELECT
-                    CAST(
-                        EXTRACT(
-                            EPOCH FROM submissions.submitted_at
-                        ) as bigint
-                    ) as "timestamp!",
+                    submitted_at as "timestamp",
                     pseudonym,
                     file_name as filename,
                     length(file_contents) as "filesize!"
@@ -120,11 +103,15 @@ pub async fn submissions(State(db): State<Pool<Postgres>>) -> Result<impl IntoRe
 pub struct Submission {
     username: String,
     #[form_data(limit = "unlimited")]
+    // still limited by the axum request body limiter, just not limited within the multipart
+    // handler
     file: FieldData<Bytes>,
 }
 
+/// Handles new submissions from students
 pub async fn new_submission(
     State(db): State<Pool<Postgres>>,
+    // type-safe multipart extractor
     BaseMultipart {
         data: Submission { username, file },
         ..
@@ -153,7 +140,7 @@ pub async fn new_submission(
                 INSERT INTO users (username, pseudonym) VALUES ($1, $2) ON CONFLICT DO NOTHING;
             "#,
             &username,
-            "beep",
+            hash_username(&username),
         )
         .execute(&mut *tx)
         .await?;
@@ -173,4 +160,11 @@ pub async fn new_submission(
     }
 
     Ok(StatusCode::OK)
+}
+
+/// Emits the first 6 hex characters of the hash of the username
+fn hash_username(username: &str) -> String {
+    let mut hasher = XxHash64::with_seed(0);
+    hasher.write(username.as_bytes());
+    format!("{:X}", hasher.finish() as u32)
 }

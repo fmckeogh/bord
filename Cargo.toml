@@ -29,3 +29,4 @@ tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 displaydoc = "0.2.4"
 thiserror = "1.0.56"
+twox-hash = "1.6.3"

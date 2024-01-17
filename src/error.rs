@@ -19,6 +19,8 @@ pub enum Error {
     Multipart(#[from] TypedMultipartError),
 }
 
+/// Errors can be returned from handler functions to be automatically converted
+/// into a response
 impl IntoResponse for Error {
     fn into_response(self) -> Response {
         error!("Error occurred when handling request: {:?}", self);
@@ -27,6 +29,8 @@ impl IntoResponse for Error {
             Error::Database(_) | Error::Multipart(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
 
-        (status_code, self.to_string()).into_response()
+        // note we do not report the error to the user; if we want this we need to
+        // santize error messages for sensitive information
+        status_code.into_response()
     }
 }
